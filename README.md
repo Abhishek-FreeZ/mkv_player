@@ -28,3 +28,6 @@ npm start
 ```bash
 http://localhost:3000
 ```
+### Prerequisites 
+ffmpeg - https://ffmpeg.org/download.html
+Node.js
