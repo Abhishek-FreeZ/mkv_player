@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VideoStream Pro - Player</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .audio-control-wrapper {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+    }
+    
+    .audio-control-wrapper label {
+      display: inline-block;
+      margin-right: 10px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .audio-selector {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: white;
+      font-size: 14px;
+      min-width: 200px;
+    }
+    
+    .sync-status {
+      margin-left: 15px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      display: inline-block;
+    }
+    
+    .sync-status.synced {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .sync-status.syncing {
+      background: #fff3cd;
+      color: #856404;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="nav-logo">
+        <a href="index.html">🎬 VideoStream Pro</a>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html" class="nav-link">Home</a></li>
+        <li class="nav-item"><a href="library.html" class="nav-link">Library</a></li>
+        <li class="nav-item"><a href="upload.html" class="nav-link">Upload</a></li>
+      </ul>
+      <div class="hamburger">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="player-container">
+      <div class="player-header">
+        <a href="library.html" class="back-btn">← Back to Library</a>
+        <h1 id="videoTitle" class="video-title">Loading...</h1>
+      </div>
+
+      <div class="video-wrapper">
+        <video id="native-video" controls width="100%" height="600"></video>
+        <!-- Hidden audio element for external audio tracks -->
+        <audio id="external-audio" style="display: none;"></audio>
+      </div>
+
+      <div class="player-info">
+        <div class="controls-info">
+          <h3>Keyboard Controls</h3>
+          <div class="controls-grid">
+            <div class="control-item"><kbd>Space</kbd><span>Play/Pause</span></div>
+            <div class="control-item"><kbd>M</kbd><span>Mute/Unmute</span></div>
+            <div class="control-item"><kbd>↑</kbd><span>Volume Up</span></div>
+            <div class="control-item"><kbd>↓</kbd><span>Volume Down</span></div>
+            <div class="control-item"><kbd>→</kbd><span>Seek Forward 5s</span></div>
+            <div class="control-item"><kbd>←</kbd><span>Seek Backward 5s</span></div>
+            <div class="control-item"><kbd>F</kbd><span>Fullscreen</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-content">
+      <p>&copy; 2024 VideoStream Pro</p>
+    </div>
+  </footer>
+  <script>
+class AudioVideoController {
+  constructor(videoElement, audioElement) {
+    this.video = videoElement;
+    this.externalAudio = audioElement;
+    this.audioTracks = [];
+    this.currentAudioIndex = -1;  
+    this.useExternalAudio = false;
+    this.syncThreshold = 0.1; // 100ms sync threshold
+    this.isSwitching = false;
+    
+    this.setupEventListeners();
+  }
+  
+  setupEventListeners() {
+    // Video control events
+    this.video.addEventListener('play', () => this.handleVideoPlay());
+    this.video.addEventListener('pause', () => this.handleVideoPause());
+    this.video.addEventListener('seeking', () => this.handleVideoSeeking());
+    this.video.addEventListener('seeked', () => this.handleVideoSeeked());
+    this.video.addEventListener('volumechange', () => this.handleVolumeChange());
+    
+    // Sync check interval
+    this.syncInterval = setInterval(() => this.checkSync(), 100);
+  }
+  
+  loadAudioTracks(audioUrls) {
+    this.audioTracks = audioUrls;
+    if (audioUrls.length > 0) {
+      this.useExternalAudio = true;
+      this.switchToAudioTrack(0);
+    }
+  }
+  
+  async switchToAudioTrack(index) {
+    if (this.isSwitching || index === this.currentAudioIndex) return;
+    
+    this.isSwitching = true;
+    this.updateSyncStatus('syncing');
+    
+    const wasPlaying = !this.video.paused;
+    const currentTime = this.video.currentTime;
+    const currentVolume = this.video.volume;
+    
+    try {
+      // Load new audio track
+      this.externalAudio.src = this.audioTracks[index];
+      
+      // Wait for audio to be ready
+      await this.waitForAudioReady();
+      
+      // Mute video audio if using external audio
+      this.video.muted = this.useExternalAudio;
+      
+      // Sync audio to video position
+      this.externalAudio.currentTime = currentTime;
+      this.externalAudio.volume = currentVolume;
+      
+      // Resume playback if video was playing
+      if (wasPlaying) {
+        await Promise.all([
+          this.video.play(),
+          this.externalAudio.play()
+        ]);
+      }
+      
+      this.currentAudioIndex = index;
+      this.updateSyncStatus('synced');
+      
+    } catch (error) {
+      console.error('Error switching audio track:', error);
+      this.updateSyncStatus('error');
+    } finally {
+      this.isSwitching = false;
+    }
+  }
+  
+  waitForAudioReady() {
+    return new Promise((resolve, reject) => {
+      if (this.externalAudio.readyState >= 2) {
+        resolve();
+        return;
+      }
+      
+      const timeout = setTimeout(() => {
+        reject(new Error('Audio load timeout'));
+      }, 10000);
+      
+      const onReady = () => {
+        clearTimeout(timeout);
+        this.externalAudio.removeEventListener('canplaythrough', onReady);
+        this.externalAudio.removeEventListener('error', onError);
+        resolve();
+      };
+      
+      const onError = (e) => {
+        clearTimeout(timeout);
+        this.externalAudio.removeEventListener('canplaythrough', onReady);
+        this.externalAudio.removeEventListener('error', onError);
+        reject(e);
+      };
+      
+      this.externalAudio.addEventListener('canplaythrough', onReady, { once: true });
+      this.externalAudio.addEventListener('error', onError, { once: true });
+    });
+  }
+  
+  handleVideoPlay() {
+    if (this.useExternalAudio && !this.isSwitching) {
+      this.externalAudio.currentTime = this.video.currentTime;
+      this.externalAudio.play().catch(console.error);
+    }
+  }
+  
+  handleVideoPause() {
+    if (this.useExternalAudio) {
+      this.externalAudio.pause();
+    }
+  }
+  
+  handleVideoSeeking() {
+    if (this.useExternalAudio) {
+      this.externalAudio.currentTime = this.video.currentTime;
+    }
+  }
+  
+  handleVideoSeeked() {
+    if (this.useExternalAudio) {
+      this.externalAudio.currentTime = this.video.currentTime;
+    }
+  }
+  
+  handleVolumeChange() {
+    if (this.useExternalAudio) {
+      this.externalAudio.volume = this.video.volume;
+    }
+  }
+  
+  checkSync() {
+    if (!this.useExternalAudio || this.isSwitching) return;
+    
+    const timeDiff = Math.abs(this.video.currentTime - this.externalAudio.currentTime);
+    
+    if (timeDiff > this.syncThreshold) {
+      this.externalAudio.currentTime = this.video.currentTime;
+    }
+  }
+  
+  updateSyncStatus(status) {
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) {
+      statusEl.className = `sync-status ${status}`;
+      statusEl.textContent = status === 'synced' ? '✓ Synced' : 
+                           status === 'syncing' ? '⟳ Syncing...' : 
+                           '⚠ Error';
+    }
+  }
+  
+  destroy() {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const videoInfo = sessionStorage.getItem('currentVideo');
+  if (!videoInfo) {
+    alert('No video selected. Redirecting to library.');
+    window.location.href = 'library.html';
+    return;
+  }
+
+  const { url, name } = JSON.parse(videoInfo);
+  const videoTitle = document.getElementById('videoTitle');
+  videoTitle.textContent = name;
+
+  const videoFolder = url.substring(0, url.lastIndexOf('/'));
+  const videoEl = document.getElementById('native-video');
+  const audioEl = document.getElementById('external-audio');
+
+  // Initialize audio-video controller
+  const controller = new AudioVideoController(videoEl, audioEl);
+
+  // Set video source
+  const source = document.createElement('source');
+  source.src = url;
+  source.type = 'video/mp4';
+  videoEl.appendChild(source);
+
+  try {
+    // Fetch list of available media files
+    const res = await fetch(`/media-list?dir=${encodeURIComponent(videoFolder)}`);
+    const data = await res.json();
+
+    // Add subtitle tracks
+    data.subtitles.forEach((sub, index) => {
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.label = `Subtitle ${index + 1}`;
+      track.srclang = 'en';
+      track.src = sub;
+      if (index === 0) track.default = true;
+      videoEl.appendChild(track);
+    });
+
+    // Handle multiple audio tracks
+    if (data.audios && data.audios.length > 0) {
+      // Load audio tracks into controller
+      controller.loadAudioTracks(data.audios);
+      
+      // Create audio track selector
+      const audioSelector = document.createElement('select');
+      audioSelector.id = 'audio-select';
+      audioSelector.className = 'audio-selector';
+      
+      // Add default option for video's built-in audio
+      const defaultOption = document.createElement('option');
+      defaultOption.value = 'default';
+      defaultOption.textContent = 'Default (Video Audio)';
+      audioSelector.appendChild(defaultOption);
+      
+      // Add external audio track options
+      data.audios.forEach((aud, idx) => {
+        const option = document.createElement('option');
+        option.value = idx.toString();
+        const fileNameWithExt = aud.split('/').pop();
+        const fileName = fileNameWithExt.split('.').slice(0, -1).join('.');
+        option.textContent = `${fileName}`;
+        audioSelector.appendChild(option);
+      });
+
+      // Handle audio track switching
+      audioSelector.addEventListener('change', async (e) => {
+        const value = e.target.value;
+        
+        if (value === 'default') {
+          // Switch back to video's built-in audio
+          controller.useExternalAudio = false;
+          videoEl.muted = false;
+          audioEl.pause();
+          audioEl.currentTime = 0;
+          controller.updateSyncStatus('synced');
+        } else {
+          // Switch to external audio track
+          const trackIndex = parseInt(value);
+          await controller.switchToAudioTrack(trackIndex);
+        }
+      });
+
+      // Create control wrapper
+      const audioControlWrapper = document.createElement('div');
+      audioControlWrapper.className = 'audio-control-wrapper';
+      audioControlWrapper.innerHTML = `
+        <label for="audio-select">Audio Track:</label>
+      `;
+      audioControlWrapper.appendChild(audioSelector);
+
+      // Add sync status indicator
+      const syncStatus = document.createElement('span');
+      syncStatus.id = 'sync-status';
+      syncStatus.className = 'sync-status synced';
+      syncStatus.textContent = '✓ Synced';
+      audioControlWrapper.appendChild(syncStatus);
+      
+      // Add to player controls area
+      document.querySelector('.player-info').prepend(audioControlWrapper);
+      audioSelector.value = '0';
+      audioSelector.dispatchEvent(new Event('change'));
+    }
+
+  } catch (err) {
+    console.error('Failed to load subtitles/audio:', err);
+  }
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    controller.destroy();
+  });
+});
+</script>
+
+</body>
+</html>
