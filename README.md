@@ -15,4 +15,16 @@ cd <your-project-directory>
 ### 2. Install Dependencies
 
 ```bash
-npm install```
+npm install
+```
+
+### 3. Start the Application
+
+```bash
+npm start
+```
+### 4. View the UI
+
+```bash
+http://localhost:3000
+```
